@@ -5,6 +5,7 @@ declare const name = "dsh-mineru";
 declare const inject: string[];
 type MineruBackend = 'pipeline' | 'vlm-engine' | 'hybrid-engine' | 'vlm-http-client' | 'hybrid-http-client';
 type MineruParseMethod = 'auto' | 'txt' | 'ocr';
+type MineruMode = 'local' | 'cloud';
 /**
  * The live Cordis config the Loader passes to `apply` (dsh 0.1.7-rc.1).
  *
@@ -12,11 +13,19 @@ type MineruParseMethod = 'auto' | 'txt' | 'ocr';
  * committed settings edit updates it in place without remounting the plugin.
  */
 interface EntryConfig {
-  /** Live MinerU API base URL. */
+  /** Live transport mode: self-hosted server or the mineru.net cloud API. */
+  mode: Volatile<string> | string;
+  /** Live MinerU API base URL (local mode). */
   baseURL: Volatile<string> | string;
-  /** Live env-var name the API key is resolved from. */
+  /** Live env-var name the local API key is resolved from. */
   apiKeyEnv: Volatile<string> | string;
-  /** Live default parsing backend. */
+  /** Live mineru.net cloud API base URL (cloud mode). */
+  cloudBaseURL: Volatile<string> | string;
+  /** Live env-var name the cloud API token is resolved from. */
+  cloudApiKeyEnv: Volatile<string> | string;
+  /** Live cloud model version (pipeline | vlm). */
+  cloudModelVersion: Volatile<string> | string;
+  /** Live default parsing backend (local mode). */
   defaultBackend: Volatile<string> | string;
   /** Live default parse method. */
   defaultParseMethod: Volatile<string> | string;
@@ -41,4 +50,4 @@ interface EntryConfig {
 declare const Config: z<EntryConfig>;
 declare function apply(ctx: Context, config?: EntryConfig): void;
 //#endregion
-export { Config, EntryConfig, MineruBackend, MineruParseMethod, apply, inject, name };
+export { Config, EntryConfig, MineruBackend, MineruMode, MineruParseMethod, apply, inject, name };

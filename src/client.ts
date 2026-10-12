@@ -14,6 +14,21 @@ import { basename, extname } from 'node:path'
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
+/**
+ * Backend-agnostic facade both transport modes implement.
+ *
+ * `MinerUClient` (this file) serves the self-hosted FastAPI protocol v2;
+ * `MinerUCloudClient` (cloud.ts) serves the mineru.net precise-parsing API
+ * v4. The tools layer depends only on this shape, so the active mode is a
+ * pure configuration concern.
+ */
+export interface MinerUBackend {
+  health(signal: AbortSignal): Promise<HealthResponse>
+  submitTask(filePath: string, params: ParseParams, signal: AbortSignal): Promise<TaskSubmitResponse>
+  getTaskStatus(taskId: string, signal: AbortSignal): Promise<TaskStatusResponse>
+  getTaskResult(taskId: string, signal: AbortSignal): Promise<TaskResultResponse>
+}
+
 export interface HealthResponse {
   status: 'healthy' | 'unhealthy'
   version: string
@@ -176,7 +191,7 @@ export interface MinerUClientOptions {
   apiKeyResolver?: () => Promise<string | undefined>
 }
 
-export class MinerUClient {
+export class MinerUClient implements MinerUBackend {
   private readonly baseURL: string
   private readonly timeoutMs: number
   private readonly apiKeyResolver?: () => Promise<string | undefined>
@@ -271,7 +286,7 @@ export class MinerUClient {
 }
 
 export async function pollUntilDone(
-  client: MinerUClient,
+  client: MinerUBackend,
   taskId: string,
   opts: { intervalMs: number; timeoutMs: number; signal: AbortSignal },
 ): Promise<TaskStatusResponse> {

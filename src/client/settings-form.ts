@@ -9,7 +9,7 @@
  * the Host settings service (`form.set` resolves to whether the Host
  * accepted the write).
  *
- * This controller stages the nine editable fields, overlays drafts on the
+ * This controller stages the editable fields, overlays drafts on the
  * accepted section value, and publishes one snapshot the page renders
  * through its bound `useMineruSettings` hook. Pattern follows
  * dsh-plugin-preface-context's card controller (the upstream `CardForm`
@@ -54,10 +54,14 @@ class MiniSnapshotStore<T> implements SnapshotStore<T> {
   }
 }
 
-/** The nine fields the settings page edits (mirrors the host entry Config). */
+/** The fields the settings page edits (mirrors the host entry Config). */
 export interface MineruFormValues {
+  readonly mode: string
   readonly baseURL: string
   readonly apiKeyEnv: string
+  readonly cloudBaseURL: string
+  readonly cloudApiKeyEnv: string
+  readonly cloudModelVersion: string
   readonly defaultBackend: string
   readonly defaultParseMethod: string
   readonly defaultLang: string
@@ -69,8 +73,12 @@ export interface MineruFormValues {
 
 /** Composition-layer defaults, mirroring the host Config schema exactly. */
 export const MINERU_FORM_DEFAULTS: MineruFormValues = {
+  mode: 'local',
   baseURL: '',
   apiKeyEnv: 'MINERU_API_KEY',
+  cloudBaseURL: 'https://mineru.net',
+  cloudApiKeyEnv: 'MINERU_CLOUD_API_KEY',
+  cloudModelVersion: 'vlm',
   defaultBackend: 'pipeline',
   defaultParseMethod: 'auto',
   defaultLang: 'ch',

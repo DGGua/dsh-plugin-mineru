@@ -28,6 +28,8 @@ type SettingsPageProps = PropsRuntime<'plugins.row.config'> & PropsLocale<'dsh-m
 
 const BACKENDS = ['pipeline', 'vlm-engine', 'hybrid-engine', 'vlm-http-client', 'hybrid-http-client'] as const
 const PARSE_METHODS = ['auto', 'txt', 'ocr'] as const
+const MODES = ['local', 'cloud'] as const
+const CLOUD_MODELS = ['pipeline', 'vlm'] as const
 
 export function SettingsPage(props: SettingsPageProps): ReactNode {
   const { t } = props
@@ -72,6 +74,7 @@ export function SettingsPage(props: SettingsPageProps): ReactNode {
   }
 
   const { values } = state
+  const isCloud = values.mode === 'cloud'
 
   return (
     <section className={css.section}>
@@ -80,39 +83,82 @@ export function SettingsPage(props: SettingsPageProps): ReactNode {
 
       <div className={css.editor}>
         <label className={css.field}>
-          <span className={css.fieldLabel}>{t('field.baseURL')}</span>
-          <input
-            className={css.input}
-            value={values.baseURL}
-            placeholder={t('field.baseURL.placeholder')}
-            onChange={e => props.edit('baseURL', e.target.value)}
-          />
+          <span className={css.fieldLabel}>{t('field.mode')}</span>
+          <select
+            className={css.select}
+            value={values.mode}
+            onChange={e => props.edit('mode', e.target.value)}
+          >
+            {MODES.map(m => (
+              <option key={m} value={m}>{t(`mode.${m}` as MineruKey)}</option>
+            ))}
+          </select>
+          <span className={css.hint}>{t('field.mode.hint')}</span>
         </label>
 
-        <label className={css.field}>
-          <span className={css.fieldLabel}>{t('field.apiKeyEnv')}</span>
-          <input
-            className={css.input}
-            value={values.apiKeyEnv}
-            placeholder={t('field.apiKeyEnv.placeholder')}
-            onChange={e => props.edit('apiKeyEnv', e.target.value)}
-          />
-        </label>
+        {!isCloud && (
+          <>
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.baseURL')}</span>
+              <input
+                className={css.input}
+                value={values.baseURL}
+                placeholder={t('field.baseURL.placeholder')}
+                onChange={e => props.edit('baseURL', e.target.value)}
+              />
+            </label>
+
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.apiKeyEnv')}</span>
+              <input
+                className={css.input}
+                value={values.apiKeyEnv}
+                placeholder={t('field.apiKeyEnv.placeholder')}
+                onChange={e => props.edit('apiKeyEnv', e.target.value)}
+              />
+            </label>
+          </>
+        )}
+
+        {isCloud && (
+          <>
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.cloudBaseURL')}</span>
+              <input
+                className={css.input}
+                value={values.cloudBaseURL}
+                placeholder={t('field.cloudBaseURL.placeholder')}
+                onChange={e => props.edit('cloudBaseURL', e.target.value)}
+              />
+            </label>
+
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.cloudApiKeyEnv')}</span>
+              <input
+                className={css.input}
+                value={values.cloudApiKeyEnv}
+                placeholder={t('field.cloudApiKeyEnv.placeholder')}
+                onChange={e => props.edit('cloudApiKeyEnv', e.target.value)}
+              />
+              <span className={css.hint}>{t('field.cloudApiKeyEnv.hint')}</span>
+            </label>
+
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.cloudModelVersion')}</span>
+              <select
+                className={css.select}
+                value={values.cloudModelVersion}
+                onChange={e => props.edit('cloudModelVersion', e.target.value)}
+              >
+                {CLOUD_MODELS.map(m => (
+                  <option key={m} value={m}>{t(`model.${m}` as MineruKey)}</option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
 
         <div className={css.row}>
-          <label className={css.field}>
-            <span className={css.fieldLabel}>{t('field.defaultBackend')}</span>
-            <select
-              className={css.select}
-              value={values.defaultBackend}
-              onChange={e => props.edit('defaultBackend', e.target.value)}
-            >
-              {BACKENDS.map(b => (
-                <option key={b} value={b}>{t(`backend.${b}` as MineruKey)}</option>
-              ))}
-            </select>
-          </label>
-
           <label className={css.field}>
             <span className={css.fieldLabel}>{t('field.defaultParseMethod')}</span>
             <select
@@ -125,9 +171,7 @@ export function SettingsPage(props: SettingsPageProps): ReactNode {
               ))}
             </select>
           </label>
-        </div>
 
-        <div className={css.row}>
           <label className={css.field}>
             <span className={css.fieldLabel}>{t('field.defaultLang')}</span>
             <input
@@ -136,17 +180,34 @@ export function SettingsPage(props: SettingsPageProps): ReactNode {
               onChange={e => props.edit('defaultLang', e.target.value)}
             />
           </label>
-
-          <label className={css.field}>
-            <span className={css.fieldLabel}>{t('field.pollIntervalMs')}</span>
-            <input
-              type="number"
-              className={css.input}
-              value={values.pollIntervalMs}
-              onChange={e => props.edit('pollIntervalMs', Number(e.target.value))}
-            />
-          </label>
         </div>
+
+        {!isCloud && (
+          <div className={css.row}>
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.defaultBackend')}</span>
+              <select
+                className={css.select}
+                value={values.defaultBackend}
+                onChange={e => props.edit('defaultBackend', e.target.value)}
+              >
+                {BACKENDS.map(b => (
+                  <option key={b} value={b}>{t(`backend.${b}` as MineruKey)}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className={css.field}>
+              <span className={css.fieldLabel}>{t('field.pollIntervalMs')}</span>
+              <input
+                type="number"
+                className={css.input}
+                value={values.pollIntervalMs}
+                onChange={e => props.edit('pollIntervalMs', Number(e.target.value))}
+              />
+            </label>
+          </div>
+        )}
 
         <div className={css.row}>
           <label className={css.field}>

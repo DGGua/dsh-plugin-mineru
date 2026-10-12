@@ -29,7 +29,8 @@ import z from '@deepseek-ai/schemastery'
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 // Type-only: pulls the `ctx.settings` Context merge (SettingsForms).
 import type {} from '@deepseek-ai/dsh-settings'
-import { MinerUClient } from './client.js'
+import { MinerUClient, type MinerUBackend } from './client.js'
+import { MinerUCloudClient, type CloudModelVersion } from './cloud.js'
 import { registerTools } from './tools.js'
 import type { ResolvedConfig } from './tools.js'
 import { registerRpc } from './rpc.js'
@@ -40,6 +41,7 @@ export const inject = ['tools', 'connection']
 
 export type MineruBackend = 'pipeline' | 'vlm-engine' | 'hybrid-engine' | 'vlm-http-client' | 'hybrid-http-client'
 export type MineruParseMethod = 'auto' | 'txt' | 'ocr'
+export type MineruMode = 'local' | 'cloud'
 
 /**
  * The live Cordis config the Loader passes to `apply` (dsh 0.1.7-rc.1).
@@ -48,11 +50,19 @@ export type MineruParseMethod = 'auto' | 'txt' | 'ocr'
  * committed settings edit updates it in place without remounting the plugin.
  */
 export interface EntryConfig {
-  /** Live MinerU API base URL. */
+  /** Live transport mode: self-hosted server or the mineru.net cloud API. */
+  mode: Volatile<string> | string
+  /** Live MinerU API base URL (local mode). */
   baseURL: Volatile<string> | string
-  /** Live env-var name the API key is resolved from. */
+  /** Live env-var name the local API key is resolved from. */
   apiKeyEnv: Volatile<string> | string
-  /** Live default parsing backend. */
+  /** Live mineru.net cloud API base URL (cloud mode). */
+  cloudBaseURL: Volatile<string> | string
+  /** Live env-var name the cloud API token is resolved from. */
+  cloudApiKeyEnv: Volatile<string> | string
+  /** Live cloud model version (pipeline | vlm). */
+  cloudModelVersion: Volatile<string> | string
+  /** Live default parsing backend (local mode). */
   defaultBackend: Volatile<string> | string
   /** Live default parse method. */
   defaultParseMethod: Volatile<string> | string
@@ -76,8 +86,12 @@ export interface EntryConfig {
  * the running reference in place. Defaults are the composition-layer seed.
  */
 export const Config = z.object({
-  baseURL: z.string().description('MinerU API base URL (e.g. http://host:18000). Required.').volatile(),
+  mode: z.union(['local', 'cloud']).default('local').volatile(),
+  baseURL: z.string().description('MinerU self-hosted API base URL (e.g. http://host:18000). Required in local mode.').volatile(),
   apiKeyEnv: z.string().role('credential-ref').default('MINERU_API_KEY').volatile(),
+  cloudBaseURL: z.string().default('https://mineru.net').volatile(),
+  cloudApiKeyEnv: z.string().role('credential-ref').default('MINERU_CLOUD_API_KEY').volatile(),
+  cloudModelVersion: z.union(['pipeline', 'vlm']).default('vlm').volatile(),
   defaultBackend: z.union(['pipeline', 'vlm-engine', 'hybrid-engine', 'vlm-http-client', 'hybrid-http-client']).default('pipeline').volatile(),
   defaultParseMethod: z.union(['auto', 'txt', 'ocr']).default('auto').volatile(),
   defaultLang: z.string().default('ch').volatile(),
@@ -98,13 +112,18 @@ function live<T>(ref: Volatile<T> | T): T {
 }
 
 function resolveConfig(entry: EntryConfig): ResolvedConfig {
+  const mode = live(entry.mode) === 'cloud' ? 'cloud' : 'local'
   const baseURL = live(entry.baseURL)
-  if (typeof baseURL !== 'string' || baseURL === '') {
-    throw new Error('dsh-mineru: config "baseURL" is required. Set it on the plugin\'s configure page in the DSH GUI Plugins list or in cordis.patch.yml.')
+  if (mode === 'local' && (typeof baseURL !== 'string' || baseURL === '')) {
+    throw new Error('dsh-mineru: config "baseURL" is required in local mode. Set it on the plugin\'s configure page in the DSH GUI Plugins list or in cordis.patch.yml.')
   }
   return {
+    mode,
     baseURL,
     apiKeyEnv: live(entry.apiKeyEnv) ?? 'MINERU_API_KEY',
+    cloudBaseURL: live(entry.cloudBaseURL) ?? 'https://mineru.net',
+    cloudApiKeyEnv: live(entry.cloudApiKeyEnv) ?? 'MINERU_CLOUD_API_KEY',
+    cloudModelVersion: live(entry.cloudModelVersion) === 'pipeline' ? 'pipeline' : 'vlm',
     defaultBackend: live(entry.defaultBackend) ?? 'pipeline',
     defaultParseMethod: live(entry.defaultParseMethod) ?? 'auto',
     defaultLang: live(entry.defaultLang) ?? 'ch',
@@ -115,51 +134,64 @@ function resolveConfig(entry: EntryConfig): ResolvedConfig {
   }
 }
 
-function makeClient(ctx: Context, resolved: ResolvedConfig): MinerUClient {
+function resolveApiKey(ctx: Context, apiKeyEnv: string): () => Promise<string | undefined> {
+  return async () => {
+    try {
+      const credentials = ctx.get('credentials') as
+        | { resolve?: (ref: string) => Promise<{ value: string } | undefined> }
+        | undefined
+      if (credentials?.resolve) {
+        const hit = await credentials.resolve(apiKeyEnv)
+        if (hit?.value) return hit.value
+      }
+    } catch {
+      // credentials service not available; fall through to env
+    }
+    const envVal = process.env[apiKeyEnv]
+    return envVal && envVal.length > 0 ? envVal : undefined
+  }
+}
+
+function makeBackend(ctx: Context, resolved: ResolvedConfig): MinerUBackend {
+  if (resolved.mode === 'cloud') {
+    return new MinerUCloudClient({
+      baseURL: resolved.cloudBaseURL,
+      apiKeyEnv: resolved.cloudApiKeyEnv,
+      modelVersion: resolved.cloudModelVersion as CloudModelVersion,
+      timeoutMs: resolved.requestTimeoutMs,
+      apiKeyResolver: resolveApiKey(ctx, resolved.cloudApiKeyEnv),
+    })
+  }
   return new MinerUClient({
     baseURL: resolved.baseURL,
     timeoutMs: resolved.requestTimeoutMs,
-    apiKeyResolver: async () => {
-      try {
-        const credentials = ctx.get('credentials') as
-          | { resolve?: (ref: string) => Promise<{ value: string } | undefined> }
-          | undefined
-        if (credentials?.resolve) {
-          const hit = await credentials.resolve(resolved.apiKeyEnv)
-          if (hit?.value) return hit.value
-        }
-      } catch {
-        // credentials service not available; fall through to env
-      }
-      const envVal = process.env[resolved.apiKeyEnv]
-      return envVal && envVal.length > 0 ? envVal : undefined
-    },
+    apiKeyResolver: resolveApiKey(ctx, resolved.apiKeyEnv),
   })
 }
 
 export function apply(ctx: Context, config: EntryConfig = {} as EntryConfig): void {
-  // Fail loud at load when the composition layers provide no baseURL.
+  // Fail loud at load when the composition layers provide no baseURL (local).
   let resolved = resolveConfig(config)
-  let client = makeClient(ctx, resolved)
+  let backend = makeBackend(ctx, resolved)
 
   // Re-read the volatile references on every access; a committed settings
-  // edit hot-swaps the in-memory client without re-registering tools.
+  // edit hot-swaps the in-memory backend without re-registering tools.
   const getResolved = (): ResolvedConfig => {
     const next = resolveConfig(config)
     if (JSON.stringify(next) !== JSON.stringify(resolved)) {
       resolved = next
-      client = makeClient(ctx, next)
-      ctx.logger.info(`dsh-mineru: config updated, baseURL=${next.baseURL}`)
+      backend = makeBackend(ctx, next)
+      ctx.logger.info(`dsh-mineru: config updated, mode=${next.mode}${next.mode === 'cloud' ? ` (${next.cloudBaseURL}, ${next.cloudModelVersion})` : ` baseURL=${next.baseURL}`}`)
     }
     return resolved
   }
-  const getClient = (): MinerUClient => {
+  const getBackend = (): MinerUBackend => {
     void getResolved()
-    return client
+    return backend
   }
 
   // 1. Register tools (once; getters make them see live config).
-  registerTools(ctx, getClient, getResolved)
+  registerTools(ctx, getBackend, getResolved)
 
   // 2. Settings presentation policy: this plugin ships its own configuration
   //    card on the Plugins page (`plugins.row.config`, browser side), so
@@ -170,5 +202,5 @@ export function apply(ctx: Context, config: EntryConfig = {} as EntryConfig): vo
   })
 
   // 3. RPC: health probe for the browser configuration card (`/api` Fetch route).
-  registerRpc(ctx, { getClient })
+  registerRpc(ctx, { getBackend })
 }

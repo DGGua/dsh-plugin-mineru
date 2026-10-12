@@ -28,13 +28,17 @@ import {
   type TaskStatusResponse,
   type TaskResultResponse,
   type TaskStatus,
-  MinerUClient,
+  type MinerUBackend,
   pollUntilDone,
 } from './client.js'
 
 export interface ResolvedConfig {
+  mode: 'local' | 'cloud'
   baseURL: string
   apiKeyEnv: string
+  cloudBaseURL: string
+  cloudApiKeyEnv: string
+  cloudModelVersion: string
   defaultBackend: string
   defaultParseMethod: string
   defaultLang: string
@@ -145,12 +149,17 @@ export function renderStatusOutput(value: {
   completed_at?: string | null
   error?: string | null
   queued_ahead?: number
+  extracted_pages?: number
+  total_pages?: number
 }): string {
   const lines: string[] = [
     `Task ${value.task_id}: ${value.status}`,
   ]
   if (value.file_names && value.file_names.length > 0) lines.push(`Files: ${value.file_names.join(', ')}`)
   if (value.queued_ahead !== undefined) lines.push(`Queued ahead: ${value.queued_ahead}`)
+  if (value.extracted_pages !== undefined && value.total_pages !== undefined) {
+    lines.push(`Progress: ${value.extracted_pages}/${value.total_pages} pages`)
+  }
   if (value.created_at) lines.push(`Created: ${value.created_at}`)
   if (value.completed_at) lines.push(`Completed: ${value.completed_at}`)
   if (value.error) lines.push(`Error: ${value.error}`)
@@ -244,6 +253,8 @@ function toStatusOutput(s: TaskStatusResponse) {
     completed_at?: string
     error?: string
     queued_ahead?: number
+    extracted_pages?: number
+    total_pages?: number
   } = {
     task_id: s.task_id,
     status: s.status,
@@ -254,10 +265,13 @@ function toStatusOutput(s: TaskStatusResponse) {
   if (s.completed_at) out.completed_at = s.completed_at
   if (s.error) out.error = s.error
   if (s.queued_ahead !== undefined) out.queued_ahead = s.queued_ahead
+  const extra = s as TaskStatusResponse & { extracted_pages?: number; total_pages?: number }
+  if (extra.extracted_pages !== undefined) out.extracted_pages = extra.extracted_pages
+  if (extra.total_pages !== undefined) out.total_pages = extra.total_pages
   return out
 }
 
-export function registerTools(ctx: Context, getClient: () => MinerUClient, getConfig: () => ResolvedConfig): void {
+export function registerTools(ctx: Context, getClient: () => MinerUBackend, getConfig: () => ResolvedConfig): void {
   const client = () => getClient()
   const config = () => getConfig()
   ctx.tools.register(defineTool({
@@ -297,7 +311,9 @@ export function registerTools(ctx: Context, getClient: () => MinerUClient, getCo
       + 'Poll the task status with mineru_get_parse_status, then fetch results with mineru_get_parse_result. '
       + 'Use this for large documents that may take minutes to parse, or when submitting multiple jobs in parallel. '
       + 'The file must be a local filesystem path; if you only have a URL, download it first (e.g., via bash curl). '
-      + "Default backend is 'pipeline' (hallucination-free, supports all languages).",
+      + "Default backend is 'pipeline' (hallucination-free, supports all languages). "
+      + 'In cloud mode (mineru.net API, set on the plugin configure page) the file uploads via a signed URL and the '
+      + 'backend parameter is ignored in favor of the configured cloud model version.',
     parameters: {
       file_path: {
         type: 'string',
@@ -397,6 +413,8 @@ export function registerTools(ctx: Context, getClient: () => MinerUClient, getCo
           completed_at: { type: 'string', description: 'ISO-8601 timestamp.' },
           error: { type: 'string', description: 'Error message if status is "failed".' },
           queued_ahead: { type: 'integer', description: 'Tasks ahead in queue (only while pending).' },
+          extracted_pages: { type: 'integer', description: 'Pages parsed so far (cloud mode, while processing).' },
+          total_pages: { type: 'integer', description: 'Total document pages (cloud mode, while processing).' },
         },
       },
       render: textRender(renderStatusOutput),
@@ -487,7 +505,9 @@ export function registerTools(ctx: Context, getClient: () => MinerUClient, getCo
       + 'and returns the markdown content inline. For large documents or when you need to interleave other work, '
       + 'use mineru_submit_parse_job + mineru_get_parse_status + mineru_get_parse_result instead. '
       + 'The file must be a local filesystem path; if you only have a URL, download it first (e.g., via bash curl). '
-      + "Default backend is 'pipeline' (hallucination-free, supports all languages).",
+      + "Default backend is 'pipeline' (hallucination-free, supports all languages). "
+      + 'In cloud mode (mineru.net API, set on the plugin configure page) the file uploads via a signed URL and the '
+      + 'backend parameter is ignored in favor of the configured cloud model version.',
     parameters: {
       file_path: {
         type: 'string',
@@ -570,7 +590,7 @@ export function registerTools(ctx: Context, getClient: () => MinerUClient, getCo
       const submit = await c.submitTask(a.file_path, toParseParams(a, cfg), exec.signal)
 
       const pollTimeoutMs = a.poll_timeout_ms ?? cfg.pollTimeoutMs
-      const finalStatus = await pollUntilDone(c, submit.task_id, {
+      const finalStatus = await pollUntilDone(client(), submit.task_id, {
         intervalMs: cfg.pollIntervalMs,
         timeoutMs: pollTimeoutMs,
         signal: exec.signal,

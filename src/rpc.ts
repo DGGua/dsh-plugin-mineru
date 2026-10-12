@@ -22,7 +22,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { API_PATH, type ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
-import { MinerUClient, type HealthResponse } from './client.js'
+import { type MinerUBackend, type HealthResponse } from './client.js'
 
 /** Local alias: the carrier-neutral Connection RPC result shape. */
 type RpcResult<T> = ConnectionRpcResult<T>
@@ -71,7 +71,7 @@ function envelopeResponse(rpcId: string, result: RpcResult<unknown>): Response {
 }
 
 export interface MineruRpcDeps {
-  readonly getClient: () => MinerUClient
+  readonly getBackend: () => MinerUBackend
 }
 
 /**
@@ -79,7 +79,7 @@ export interface MineruRpcDeps {
  * service. The route rolls back with the plugin fiber; trust and browser
  * authentication live on the physical `/api` carrier.
  * @param ctx - host context (`connection` is injected by the entry).
- * @param deps - live MinerU client getter (sees the latest config).
+ * @param deps - live MinerU backend getter (sees the latest config and mode).
  */
 export function registerRpc(ctx: Context, deps: MineruRpcDeps): void {
   ctx.logger.info(`dsh-mineru: registering ${API_PATH}/${HEALTH_ENDPOINT} Fetch route`)
@@ -115,7 +115,7 @@ export function registerRpc(ctx: Context, deps: MineruRpcDeps): void {
           ))
         }
         try {
-          const h: HealthResponse = await deps.getClient().health(request.signal)
+          const h: HealthResponse = await deps.getBackend().health(request.signal)
           return envelopeResponse(envelope.rpcId, ok({
             status: h.status,
             version: h.version,

@@ -69,6 +69,12 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+.hint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .input,
 .select {
   height: 32px;
